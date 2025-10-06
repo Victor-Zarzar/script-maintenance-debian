@@ -3,20 +3,42 @@ import subprocess
 import shutil
 from pathlib import Path
 
-def run_command(command, use_sudo=False, ignore_errors=False):
-    """Executa comando com tratamento de erro melhorado"""
+def run_command(command, use_sudo=False, ignore_errors=False, input_text=None):
+    """Executa comando com tratamento de erro"""
     try:
         if use_sudo:
             command = f"sudo {command}"
-        result = subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
+        
+        if input_text:
+            result = subprocess.run(
+                command, 
+                shell=True, 
+                check=True, 
+                capture_output=True, 
+                text=True,
+                input=input_text
+            )
+        else:
+            result = subprocess.run(
+                command, 
+                shell=True, 
+                check=True, 
+                capture_output=True, 
+                text=True,
+                timeout=30
+            )
         return True, result.stdout
+    except subprocess.TimeoutExpired:
+        if not ignore_errors:
+            print(f"  ⏱️ Timeout ao executar: {command}")
+        return False, "Timeout"
     except subprocess.CalledProcessError as e:
         if not ignore_errors:
-            print(f"⚠️ Erro ao executar: {command}\n{e}")
+            print(f"  ⚠️ Erro ao executar: {command}\n  {e}")
         return False, e.stderr
     except Exception as e:
         if not ignore_errors:
-            print(f"⚠️ Erro inesperado: {e}")
+            print(f"  ⚠️ Erro inesperado: {e}")
         return False, str(e)
 
 def update_system():
@@ -54,7 +76,8 @@ def clean_package_cache():
     cache_path = "/var/cache/apt/archives"
     if os.path.exists(cache_path):
         size = get_folder_size(cache_path)
-        print(f"  📦 Cache atual: {format_bytes(size)}")
+        if size > 0:
+            print(f"  📦 Cache atual: {format_bytes(size)}")
     
     run_command("apt clean", use_sudo=True)
     run_command("apt autoclean", use_sudo=True)
@@ -100,6 +123,146 @@ def clean_flatpak():
     
     print("  ✅ Flatpak otimizado")
 
+def clean_nvm_npm_cache():
+    """Limpa cache do nvm e npm"""
+    print("📦 Limpando cache do nvm/npm...")
+    
+    nvm_dir = os.path.expanduser("~/.nvm")
+    if os.path.exists(nvm_dir):
+        npm_cache_path = os.path.expanduser("~/.npm")
+        if os.path.exists(npm_cache_path):
+            size = get_folder_size(npm_cache_path)
+            if size > 0:
+                print(f"  📊 Tamanho do cache npm: {format_bytes(size)}")
+            try:
+                shutil.rmtree(npm_cache_path, ignore_errors=True)
+                print("  ✅ Cache npm removido")
+            except Exception as e:
+                print(f"  ⚠️ Erro ao remover cache npm: {e}")
+        
+        nvm_cache_paths = [
+            "~/.nvm/.cache"
+        ]
+        
+        for path in nvm_cache_paths:
+            expanded_path = os.path.expanduser(path)
+            if os.path.exists(expanded_path):
+                try:
+                    size = get_folder_size(expanded_path)
+                    shutil.rmtree(expanded_path, ignore_errors=True)
+                    if size > 0:
+                        print(f"  ✅ Removido {format_bytes(size)}: {path}")
+                except Exception:
+                    pass
+        
+        success, _ = run_command("npm cache clean --force", ignore_errors=True)
+        if success:
+            run_command("npm cache verify", ignore_errors=True)
+        
+        print("  ✅ Cache do nvm/npm limpo")
+    else:
+        print("  ℹ️ nvm não encontrado, pulando...")
+
+def clean_pnpm_cache():
+    """Limpa cache do pnpm"""
+    print("📦 Limpando cache do pnpm...")
+    
+    success, _ = run_command("which pnpm", ignore_errors=True)
+    if success:
+        pnpm_paths = [
+            "~/.pnpm-store",
+            "~/.local/share/pnpm/store"
+        ]
+        
+        total_size = 0
+        for path in pnpm_paths:
+            expanded_path = os.path.expanduser(path)
+            if os.path.exists(expanded_path):
+                size = get_folder_size(expanded_path)
+                total_size += size
+        
+        if total_size > 0:
+            print(f"  📊 Tamanho do cache pnpm: {format_bytes(total_size)}")
+        
+        run_command("pnpm store prune", ignore_errors=True)
+        print("  ✅ Cache do pnpm limpo")
+    else:
+        print("  ℹ️ pnpm não encontrado, pulando...")
+
+def clean_dart_flutter_cache():
+    """Limpa cache do Dart, Flutter e FVM"""
+    print("🎯 Limpando cache do Dart/Flutter/FVM...")
+    
+    success, _ = run_command("which flutter", ignore_errors=True)
+    if success:
+        flutter_cache_path = os.path.expanduser("~/.flutter")
+        if os.path.exists(flutter_cache_path):
+            size = get_folder_size(flutter_cache_path)
+            if size > 0:
+                print(f"  📊 Tamanho do cache Flutter: {format_bytes(size)}")
+        
+        flutter_clean_paths = [
+            "~/.flutter-devtools",
+            "~/.flutter/bin/cache"
+        ]
+        
+        for path in flutter_clean_paths:
+            expanded_path = os.path.expanduser(path)
+            if os.path.exists(expanded_path):
+                try:
+                    shutil.rmtree(expanded_path, ignore_errors=True)
+                except Exception:
+                    pass
+        
+        print("  🔄 Limpando pub cache...")
+        run_command("echo 'y' | flutter pub cache clean", ignore_errors=True)
+        
+        run_command("flutter pub cache repair", ignore_errors=True)
+        
+        print("  ✅ Cache do Flutter limpo")
+    else:
+        print("  ℹ️ Flutter não encontrado")
+    
+    dart_cache_paths = [
+        "~/.pub-cache/hosted/*/cache",
+        "~/.dart",
+        "~/.dartServer"
+    ]
+    
+    total_dart_size = 0
+    for path in dart_cache_paths:
+        expanded_path = os.path.expanduser(path)
+        if "*" in path:
+            run_command(f"find {os.path.dirname(os.path.expanduser(path))} -path '*cache' -type d -exec rm -rf {{}} + 2>/dev/null", ignore_errors=True)
+        elif os.path.exists(expanded_path):
+            size = get_folder_size(expanded_path)
+            total_dart_size += size
+            try:
+                shutil.rmtree(expanded_path, ignore_errors=True)
+            except Exception:
+                pass
+    
+    if total_dart_size > 0:
+        print(f"  📊 Cache Dart removido: {format_bytes(total_dart_size)}")
+    
+    success, _ = run_command("which dart", ignore_errors=True)
+    if success:
+        run_command("dart pub cache repair", ignore_errors=True)
+        print("  ✅ Cache do Dart limpo")
+    
+    success, _ = run_command("which fvm", ignore_errors=True)
+    if success:
+        fvm_cache_path = os.path.expanduser("~/fvm/versions")
+        if os.path.exists(fvm_cache_path):
+            size = get_folder_size(fvm_cache_path)
+            if size > 0:
+                print(f"  📊 Tamanho do cache FVM: {format_bytes(size)}")
+        
+        print("  💡 FVM: use 'fvm remove <version>' para remover versões específicas")
+        print("  ✅ FVM verificado")
+    else:
+        print("  ℹ️ FVM não encontrado")
+
 def clean_docker():
     """Limpa recursos não usados do Docker"""
     print("🐳 Limpando Docker...")
@@ -109,7 +272,7 @@ def clean_docker():
         print("  ℹ️ Docker não está instalado")
         return
     
-    run_command("docker stop $(docker ps -q)", ignore_errors=True)
+    run_command("docker stop $(docker ps -q) 2>/dev/null", ignore_errors=True)
     run_command("docker system prune -af --volumes", ignore_errors=True)
     run_command("docker builder prune -af", ignore_errors=True)
     run_command("docker image prune -af", ignore_errors=True)
@@ -120,8 +283,10 @@ def clean_old_kernels():
     """Remove kernels antigos mantendo os 2 mais recentes"""
     print("🔧 Removendo kernels antigos (mantendo os 2 mais recentes)...")
     
-    current_kernel = subprocess.run("uname -r", shell=True, capture_output=True, text=True).stdout.strip()
-    print(f"  ℹ️ Kernel atual: {current_kernel}")
+    success, output = run_command("uname -r", ignore_errors=True)
+    if success:
+        current_kernel = output.strip()
+        print(f"  ℹ️ Kernel atual: {current_kernel}")
     
     kernel_cleanup = """
     dpkg --list | grep -E 'linux-image-[0-9]' | awk '{ print $2 }' | sort -V | head -n -2 | xargs sudo apt-get -y purge 2>/dev/null
@@ -203,7 +368,8 @@ def clean_user_caches():
     run_command("rm -rf /tmp/*", use_sudo=True, ignore_errors=True)
     run_command("rm -rf /var/tmp/*", use_sudo=True, ignore_errors=True)
     
-    print(f"  ✅ Total de cache limpo: {format_bytes(total_cleaned)}")
+    if total_cleaned > 0:
+        print(f"  ✅ Total de cache limpo: {format_bytes(total_cleaned)}")
 
 def clean_system_temp():
     """Limpa arquivos temporários do sistema"""
@@ -243,23 +409,10 @@ def clean_pip_cache():
         if os.path.exists(pip_cache):
             size = get_folder_size(pip_cache)
             run_command("pip3 cache purge", ignore_errors=True)
-            print(f"  ✅ Cache do pip limpo: {format_bytes(size)}")
+            if size > 0:
+                print(f"  ✅ Cache do pip limpo: {format_bytes(size)}")
     else:
         print("  ℹ️ pip não está instalado")
-
-def clean_npm_cache():
-    """Limpa cache do npm"""
-    print("📦 Limpando cache do npm...")
-    
-    success, _ = run_command("which npm", ignore_errors=True)
-    if success:
-        npm_cache = os.path.expanduser("~/.npm")
-        if os.path.exists(npm_cache):
-            size = get_folder_size(npm_cache)
-            run_command("npm cache clean --force", ignore_errors=True)
-            print(f"  ✅ Cache do npm limpo: {format_bytes(size)}")
-    else:
-        print("  ℹ️ npm não está instalado")
 
 def verify_system_health():
     """Verifica saúde do sistema"""
@@ -316,13 +469,15 @@ if __name__ == "__main__":
     clean_package_cache()
     clean_snap_packages()
     clean_flatpak()
+    clean_nvm_npm_cache()
+    clean_pnpm_cache()
+    clean_dart_flutter_cache()
     clean_docker()
     clean_old_kernels()
     clean_logs()
     clean_user_caches()
     clean_system_temp()
     clean_pip_cache()
-    clean_npm_cache()
     optimize_databases()
     verify_system_health()
     
