@@ -286,6 +286,106 @@ clean_flutter_dart() {
     log_action "Flutter/Dart/FVM cleaned"
 }
 
+clean_android_studio() {
+    print_section "Cleaning Android Studio & Emulator"
+    
+    local total_size=0
+    local items_cleaned=0
+    
+    if [ -d "$HOME/.android/avd" ]; then
+        for avd_dir in "$HOME/.android/avd"/*.avd; do
+            if [ -d "$avd_dir/cache" ]; then
+                local size=$(get_folder_size "$avd_dir/cache")
+                if [ "$size" -gt 0 ]; then
+                    rm -rf "$avd_dir/cache"/* 2>/dev/null && \
+                        print_success "AVD cache ($(basename "$avd_dir")): $(format_bytes $((size * 1024)))"
+                    total_size=$((total_size + size))
+                    items_cleaned=$((items_cleaned + 1))
+                fi
+            fi
+        done
+    fi
+    
+    local cache_dirs=(
+        "$HOME/.android/cache"
+        "$HOME/.android/build-cache"
+    )
+    
+    for path in "${cache_dirs[@]}"; do
+        if [ -d "$path" ]; then
+            local size=$(get_folder_size "$path")
+            if [ "$size" -gt 0 ]; then
+                rm -rf "$path"/* 2>/dev/null && \
+                    print_success "$(basename "$path"): $(format_bytes $((size * 1024)))"
+                total_size=$((total_size + size))
+                items_cleaned=$((items_cleaned + 1))
+            fi
+        fi
+    done
+    
+    local studio_cache_dirs=(
+        "$HOME/.cache/Google/AndroidStudio"*
+        "$HOME/.local/share/Google/AndroidStudio"*/caches
+    )
+    
+    for pattern in "${studio_cache_dirs[@]}"; do
+        for path in $pattern; do
+            if [ -d "$path" ]; then
+                local size=$(get_folder_size "$path")
+                if [ "$size" -gt 0 ]; then
+                    rm -rf "$path"/* 2>/dev/null && \
+                        print_success "Android Studio cache: $(format_bytes $((size * 1024)))"
+                    total_size=$((total_size + size))
+                    items_cleaned=$((items_cleaned + 1))
+                fi
+            fi
+        done
+    done
+    
+    local log_paths=(
+        "$HOME/.local/share/Google/AndroidStudio"*/log
+        "$HOME/.cache/Google/AndroidStudio"*/log
+    )
+    
+    for pattern in "${log_paths[@]}"; do
+        for log_path in $pattern; do
+            if [ -d "$log_path" ]; then
+                local size=$(get_folder_size "$log_path")
+                if [ "$size" -gt 0 ]; then
+                    rm -rf "$log_path"/* 2>/dev/null && \
+                        print_success "Android Studio logs: $(format_bytes $((size * 1024)))"
+                    total_size=$((total_size + size))
+                    items_cleaned=$((items_cleaned + 1))
+                fi
+            fi
+        done
+    done
+    
+    if [ -d "$HOME/.config/Google" ]; then
+        find "$HOME/.config/Google" -type f -name "*.backup" -mtime +30 2>/dev/null | while read backup; do
+            local size=$(get_folder_size "$(dirname "$backup")")
+            rm -f "$backup" 2>/dev/null
+        done
+    fi
+    
+    if [ -d "$HOME/.gradle/caches" ]; then
+        local size=$(get_folder_size "$HOME/.gradle/caches")
+        if [ "$size" -gt 0 ]; then
+            print_info "Gradle cache found: $(format_bytes $((size * 1024)))"
+            print_warning "Run './gradlew cleanBuildCache' in your projects to clean safely"
+        fi
+    fi
+    
+    if [ "$items_cleaned" -eq 0 ]; then
+        print_info "No Android Studio/Emulator cache found"
+    else
+        print_success "Total Android cleaned: $(format_bytes $((total_size * 1024)))"
+        TOTAL_CLEANED=$((TOTAL_CLEANED + total_size))
+    fi
+    
+    log_action "Android Studio & Emulator cleaned"
+}
+
 clean_docker() {
     print_section "Cleaning Docker"
     
@@ -464,15 +564,16 @@ show_menu() {
     echo "8)  Clean NPM/NVM"
     echo "9)  Clean PNPM"
     echo "10) Clean Flutter/Dart/FVM"
-    echo "11) Clean Docker"
-    echo "12) Remove old kernels"
-    echo "13) Clean logs"
-    echo "14) Clean user caches"
-    echo "15) Clean temporary files"
-    echo "16) Clean PIP cache"
-    echo "17) Optimize databases"
-    echo "18) Verify system health"
-    echo "19) View action log"
+    echo "11) Clean Android Studio"
+    echo "12) Clean Docker"
+    echo "13) Remove old kernels"
+    echo "14) Clean logs"
+    echo "15) Clean user caches"
+    echo "16) Clean temporary files"
+    echo "17) Clean PIP cache"
+    echo "18) Optimize databases"
+    echo "19) Verify system health"
+    echo "20) View action log"
     echo "0)  Exit"
     echo ""
     echo -n "Choose an option: "
@@ -493,6 +594,7 @@ run_full_maintenance() {
     clean_nvm_npm
     clean_pnpm
     clean_flutter_dart
+    clean_android_studio
     clean_docker
     clean_old_kernels
     clean_logs
@@ -522,13 +624,11 @@ run_full_maintenance() {
 # ============================================
 
 main() {
-    # Check if Debian/Ubuntu
     if [ ! -f /etc/debian_version ]; then
         print_error "This script is for Debian/Ubuntu systems only!"
         exit 1
     fi
     
-    # Create log file
     touch "$LOG_FILE"
     log_action "Starting maintenance script"
     
@@ -547,15 +647,16 @@ main() {
             8) clean_nvm_npm ;;
             9) clean_pnpm ;;
             10) clean_flutter_dart ;;
-            11) clean_docker ;;
-            12) clean_old_kernels ;;
-            13) clean_logs ;;
-            14) clean_user_caches ;;
-            15) clean_system_temp ;;
-            16) clean_pip_cache ;;
-            17) optimize_databases ;;
-            18) verify_system_health ;;
-            19) cat "$LOG_FILE" | less ;;
+            11) clean_android_studio ;;
+            12) clean_docker ;;
+            13) clean_old_kernels ;;
+            14) clean_logs ;;
+            15) clean_user_caches ;;
+            16) clean_system_temp ;;
+            17) clean_pip_cache ;;
+            18) optimize_databases ;;
+            19) verify_system_health ;;
+            20) cat "$LOG_FILE" | less ;;
             0) 
                 print_success "Goodbye!"
                 log_action "Script finished"
@@ -571,5 +672,4 @@ main() {
     done
 }
 
-# Execute
 main
